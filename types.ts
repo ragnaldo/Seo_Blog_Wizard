@@ -12,6 +12,12 @@ export interface BlogPost {
   };
 }
 
+export interface GenerationOptions {
+  tone: string;
+  length: string;
+  targetAudience: string;
+}
+
 export interface GeneratedImage {
   base64: string;
   mimeType: string;
@@ -26,16 +32,4 @@ export enum GenerationStatus {
   EDITING_IMAGE = 'editing_image',
   COMPLETE = 'complete',
   ERROR = 'error',
-}
-
-// Extend Window interface for Veo key selection
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey(): Promise<boolean>;
-    openSelectKey(): Promise<void>;
-  }
-
-  interface Window {
-    aistudio: AIStudio;
-  }
 }

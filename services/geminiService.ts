@@ -1,10 +1,10 @@
-import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { BlogPost, GeneratedImage } from "../types";
+import { GoogleGenAI, Modality } from "@google/genai";
+import { BlogPost, GeneratedImage, GenerationOptions } from "../types";
 
 // Helper to get fresh client (important for Veo key switching)
 const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-export const generateSEOArticle = async (topic: string, referenceUrl?: string): Promise<BlogPost> => {
+export const generateSEOArticle = async (topic: string, options: GenerationOptions, referenceUrl?: string): Promise<BlogPost> => {
   const ai = getAiClient();
   
   const prompt = `
@@ -12,27 +12,33 @@ export const generateSEOArticle = async (topic: string, referenceUrl?: string): 
     Sua tarefa é escrever um artigo de blog altamente otimizado para WordPress.
     
     Tópico Principal: "${topic}"
-    ${referenceUrl ? `URL de Referência para inspiração (use como base para fatos, mas não copie): ${referenceUrl}` : ''}
+    ${referenceUrl ? `URL de Referência para inspiração: ${referenceUrl}` : ''}
+    
+    Configurações de Escrita:
+    - Tom de Voz: ${options.tone}
+    - Tamanho do Texto: ${options.length}
+    - Público-Alvo: ${options.targetAudience}
 
-    Requisitos:
-    1. O conteúdo deve ser rico, informativo e usar a técnica Skyscraper (melhor que o conteúdo existente).
+    Requisitos de Formatação:
+    1. O conteúdo deve ser rico e informativo.
     2. Use tags H2 e H3 para estruturar.
-    3. O tom deve ser profissional mas acessível.
-    4. O idioma deve ser Português do Brasil (pt-BR).
+    3. Idioma: Português do Brasil (pt-BR).
+    4. **IMPORTANTE**: Use negrito (**texto**) APENAS para termos extremamente importantes ou palavras-chave. Não abuse do negrito.
     5. No meio do texto, onde fizer sentido ter uma imagem ilustrativa, insira exatamente a string: "[[INLINE_IMAGE_PLACEHOLDER]]".
+    6. O texto deve ser fluido e natural, focando em legibilidade.
 
-    Retorne APENAS um JSON com a seguinte estrutura:
+    Retorne APENAS um JSON válido seguindo estritamente esta estrutura:
     {
       "title": "Título chamativo (H1)",
       "slug": "url-amigavel-do-post",
       "metaDescription": "Descrição para o Google (max 160 chars)",
-      "keywords": ["array", "de", "palavras-chave"],
-      "tags": ["array", "de", "tags", "wordpress"],
+      "keywords": ["palavra1", "palavra2"],
+      "tags": ["tag1", "tag2"],
       "summary": "Um resumo curto para o excerpt do WordPress",
       "content": "O corpo do artigo em Markdown",
       "imagePrompts": {
-        "featured": "Um prompt detalhado em inglês para gerar uma imagem destacada realista sobre o tema",
-        "inline": "Um prompt detalhado em inglês para gerar a imagem do meio do texto"
+        "featured": "A detailed descriptive prompt in English for a high-quality featured image about the theme",
+        "inline": "A detailed descriptive prompt in English for a high-quality contextual image for the post body"
       }
     }
   `;
@@ -41,32 +47,24 @@ export const generateSEOArticle = async (topic: string, referenceUrl?: string): 
     model: 'gemini-3-flash-preview',
     contents: prompt,
     config: {
-      tools: [{ googleSearch: {} }], // Search Grounding for accuracy
+      tools: [{ googleSearch: {} }],
       responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          slug: { type: Type.STRING },
-          metaDescription: { type: Type.STRING },
-          keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-          tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-          summary: { type: Type.STRING },
-          content: { type: Type.STRING },
-          imagePrompts: {
-            type: Type.OBJECT,
-            properties: {
-              featured: { type: Type.STRING },
-              inline: { type: Type.STRING },
-            }
-          }
-        }
-      }
     }
   });
 
   if (!response.text) throw new Error("Falha ao gerar o artigo.");
-  return JSON.parse(response.text) as BlogPost;
+  
+  let jsonString = response.text.trim();
+  if (jsonString.startsWith('```')) {
+    jsonString = jsonString.replace(/^```(json)?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  try {
+    return JSON.parse(jsonString) as BlogPost;
+  } catch (e) {
+    console.error("JSON Parse Error", e, jsonString);
+    throw new Error("Falha ao processar a resposta da IA. Tente novamente.");
+  }
 };
 
 export const generateImage = async (prompt: string): Promise<GeneratedImage> => {
@@ -94,7 +92,6 @@ export const generateImage = async (prompt: string): Promise<GeneratedImage> => 
 
 export const editImage = async (base64Image: string, prompt: string): Promise<GeneratedImage> => {
   const ai = getAiClient();
-  // Using Gemini 2.5 Flash Image for editing ("Nano banana" request)
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: {
@@ -122,9 +119,7 @@ export const editImage = async (base64Image: string, prompt: string): Promise<Ge
 };
 
 export const generateVideo = async (base64Image: string): Promise<string> => {
-  // Ensure we have a fresh client with the potentially newly selected key
   const ai = getAiClient();
-
   let operation = await ai.models.generateVideos({
     model: 'veo-3.1-fast-generate-preview',
     image: {
@@ -146,7 +141,6 @@ export const generateVideo = async (base64Image: string): Promise<string> => {
   const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
   if (!videoUri) throw new Error("URI do vídeo não encontrada.");
 
-  // Fetch the actual bytes using the API Key
   const videoResponse = await fetch(`${videoUri}&key=${process.env.API_KEY}`);
   const blob = await videoResponse.blob();
   return URL.createObjectURL(blob);
@@ -161,7 +155,7 @@ export const generateSpeech = async (text: string): Promise<AudioBuffer> => {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Kore' }, // Nice clear voice
+          prebuiltVoiceConfig: { voiceName: 'Kore' },
         },
       },
     },
@@ -170,7 +164,6 @@ export const generateSpeech = async (text: string): Promise<AudioBuffer> => {
   const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64Audio) throw new Error("Áudio não gerado.");
 
-  // Decode audio
   const binaryString = atob(base64Audio);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
